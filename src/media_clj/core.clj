@@ -1,38 +1,61 @@
 (ns media-clj.core
   (:gen-class)
-  (:require [clojure.java.io :as io])
+  (:require [clojure.core.async :as a]
+            [clojure.pprint]
+            [clojure.java.io :as io])
   (:import [java.io BufferedInputStream FileInputStream]
-           [com.drew.imaging ImageMetadataReader]))
+           [java.text SimpleDateFormat]))
 
-(defn get-meta [filename]
-  (let [logo (io/resource filename)
-        metadata (ImageMetadataReader/readMetadata (io/file logo))]
-    metadata))
 
-(defn get-directories [metadata]
-  (let [m metadata]
-    (for [d (.getDirectories m)]
-      d)))
+(defn path->file [path]
+  (io/file path))
 
-(defn get-tags [directory]
-  (for [t (.getTags directory)]
-    {;:tag.type (.getTagType t),
-     :tag.description (.getDescription t),
-     :tag.name (.getTagName t)}))
+(def target-parent-path "/home/andz/dev/projects/media-clj/out")
 
-(defn get-errors [directory]
-  (for [e (.getErrors directory)]
-    e))
+(def sdm (SimpleDateFormat. "YYYY/MM"))
 
-(->> (get-meta "clojure-logo.png")
-    (get-directories)
-    (map (fn [d]
-           {:directory.name (.getName d),
-            :tags (get-tags d)
-            :errors (get-errors d)}))
-    (clojure.pprint/pprint))
+(defn format-with [timestamp formatter]
+  (.format formatter timestamp))
 
-(defn -main
-  "I don't do a whole lot ... yet."
-  [& args]
-  (println "Hello, World!"))
+(defn file->filemap [file]
+  (let [name (.getName file)
+        lm (.lastModified file)
+        lm-formatted (-> lm (format-with sdm))]
+    {:file file,
+     :file/name name
+     :file/last-modified-ts lm,
+     :file/last-modified-date lm-formatted,
+     :target-parent-path (str target-parent-path "/" lm-formatted),
+     :extension-normalized (identity name)}))
+
+(defn get-files [path]
+  (->> (path->file path)
+       (file-seq)
+       (filter (fn [file] (.isFile file)))
+       (map file->filemap)))
+
+(comment
+  (->> (get-files "/media/sf_share/test-media/source")
+      (map :file/name)
+      (clojure.pprint/pprint))
+
+ (def files-ch (a/chan))
+
+ (a/go
+   (while true
+     (let [file (a/<! files-ch)]
+       (println "received" (:file/name file)))))
+
+ (doseq [file (get-files "/media/sf_share/test-media/source")]
+   (a/>!! files-ch file)))
+
+;; media files processing pipeline
+;; 1. list of all files from given root directory
+;; 2. create filtered sequence of files to be moved // relevant for stats
+;; 2.1. represent via
+;;      {:file #file-object
+;;       :file/last-edited #timestamp,
+;;       :source-path "path/to/file",
+;;       :target-parent-dir "path/to/parent/dir/" // will be concatenated with YYYY/MM/ pattern
+;;       :target-path nil, // to be calculated based on :file/last-edited
+;;       :normalized-extension #{jpg, mts, mp4}}
