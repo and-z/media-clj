@@ -1,0 +1,64 @@
+(ns media-clj.files
+  (:require [clojure.string :as str]
+            [clojure.java.io :as io]))
+
+;; dev helper
+(defn remove-dir
+  "Does not remove recursively."
+  [path]
+  (let [dir (io/file path)
+        files (->> (file-seq dir)
+                   (filter (fn [file] (.isFile file))))]
+    (doseq [file files]
+      (io/delete-file file))
+    (io/delete-file dir)))
+
+(defn path->file [path]
+  (io/file path))
+
+(defn ext [filename]
+  (let [extension (str/lower-case (subs filename (str/last-index-of filename \.)))]
+    (if (contains? #{".jpg", ".jpeg", ".mts", ".mp4"} extension)
+      extension)))
+
+(defn drop-ext [filename]
+  (subs filename 0 (str/last-index-of filename \.)))
+
+(defn file->filemap [file {:keys [target-parent-path lm-format-fn]}]
+  (let [name (.getName file)
+        extension (ext name)
+        lm (.lastModified file)
+        lm-formatted (lm-format-fn lm)
+        target-path-fn (fn [name-short]
+                  (str (str/join "/" [target-parent-path lm-formatted name-short]) extension))]
+    {:file file,
+     :file/name name,
+     :file/name-short (drop-ext name),
+     :file/origin-path (.getAbsolutePath file),
+     :file/last-modified-ts lm,
+     :file/last-modified-date lm-formatted,
+     :file/target-path (str/join "/" [target-parent-path lm-formatted name]),
+     :file/target-path-fn target-path-fn,
+     :file/target-parent-path (str target-parent-path "/" lm-formatted),
+     :file/extension (or extension :ext-not-supported)}))
+
+(defn get-files [path options]
+  (->> (path->file path)
+       (file-seq)
+       (filter (fn [file] (.isFile file)))
+       (map #(file->filemap % options))))
+
+(defn copy-file! [source target a]
+  (io/make-parents target)
+  (io/copy source target)
+  (swap! a update-in [:copied] inc))
+
+(defn safe-copy-file! [file a]
+  (let [{:file/keys [target-path target-path-fn name-short]} file
+        target-file (io/file target-path)]
+    (if (.exists target-file)
+      (let [new-filename (target-path-fn (format "%s-%d" name-short (System/currentTimeMillis)))]
+        (copy-file! (:file file) (io/file new-filename) a)
+        (swap! a update-in [:duplicates] inc))
+      (copy-file! (:file file) target-file a))))
+
