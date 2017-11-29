@@ -7,12 +7,14 @@
 (defn print-stats [a]
   (future
     (while true
-     (pp/pprint @a)
-     (Thread/sleep 1000))))
+      (pp/pprint @a)
+      (Thread/sleep 1000))))
 
 (defn -main []
   (println "Start processing...")
-  (let [{:keys [stats]} (core/start-processing! {:source-path "/media/sf_share/test-media/source",
-                                        :target-path "/home/andz/dev/projects/media-clj/out"})]
-    (print-stats stats)
-    (println "Main App finished.")))
+  (let [{:keys [stats stop-ch]} (core/start-processing! {:source-path "/media/sf_share/test-media/source",
+                                                         :target-path "/home/andz/dev/projects/media-clj/out"})]
+    (println "...waiting for exit signal...")
+    (let [v (a/<!! stop-ch)]
+      (println "Main App finished. " v)
+      (pp/pprint @stats))))

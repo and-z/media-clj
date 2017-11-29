@@ -1,6 +1,7 @@
 (ns media-clj.files
   (:require [clojure.string :as str]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io]
+            [clojure.core.async :as a]))
 
 ;; dev helper
 (defn remove-dir
@@ -48,17 +49,22 @@
        (filter (fn [file] (.isFile file)))
        (map #(file->filemap % options))))
 
-(defn copy-file! [source target a]
+(defn copy-file! [source target stats]
   (io/make-parents target)
   (io/copy source target)
-  (swap! a update-in [:copied] inc))
+  (swap! stats update-in [:copied] inc))
 
-(defn safe-copy-file! [file a]
-  (let [{:file/keys [target-path target-path-fn name-short]} file
-        target-file (io/file target-path)]
+(defn copy-with-new-name!
+  [{:file/keys [target-path-fn name-short], :as file} stats]
+  (let [new-filename (target-path-fn (format "%s-%d" name-short (System/currentTimeMillis)))
+        target-file (io/file new-filename)]
+    (copy-file! (:file file) target-file stats)
+    (swap! stats update-in [:duplicates] inc)))
+
+(defn safe-copy-file!
+  [{:file/keys [target-path], :as file} stats]
+  (let [target-file (io/file target-path)]
     (if (.exists target-file)
-      (let [new-filename (target-path-fn (format "%s-%d" name-short (System/currentTimeMillis)))]
-        (copy-file! (:file file) (io/file new-filename) a)
-        (swap! a update-in [:duplicates] inc))
-      (copy-file! (:file file) target-file a))))
+      (copy-with-new-name! file stats)
+      (copy-file! (:file file) target-file stats))))
 
